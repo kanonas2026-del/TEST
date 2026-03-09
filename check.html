@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>図面・書類 AIチェッカー (Gemini版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader {
+            border-top-color: #3b82f6;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans antialiased min-h-screen pb-10">
+
+    <header class="bg-blue-600 text-white shadow-md py-4 px-6 sticky top-0 z-10">
+        <h1 class="text-xl font-bold text-center">図面・書類 AIチェッカー</h1>
+    </header>
+
+    <main class="max-w-md mx-auto mt-6 px-4 space-y-6">
+        
+        <details class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <summary class="font-semibold text-gray-700 cursor-pointer outline-none">⚙️ Gemini APIキー設定 (初回のみ)</summary>
+            <div class="mt-4 space-y-3">
+                <input type="password" id="apiKey" placeholder="AI Studioで取得したキーを入力" class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <button onclick="saveApiKey()" class="w-full bg-gray-800 text-white py-2 rounded-lg font-medium hover:bg-gray-700 transition">キーを保存</button>
+                <p class="text-xs text-gray-500">※キーはスマホのブラウザ内にのみ安全に保存されます。</p>
+            </div>
+        </details>
+
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-center">
+            <label for="imageInput" class="block w-full bg-blue-500 text-white text-lg font-bold py-4 rounded-xl cursor-pointer shadow-md hover:bg-blue-600 transition active:scale-95">
+                📸 カメラを起動 / 写真を選ぶ
+            </label>
+            <input type="file" id="imageInput" accept="image/*" capture="environment" class="hidden" onchange="previewImage(event)">
+            
+            <div id="previewContainer" class="hidden mt-4">
+                <img id="previewImage" class="w-full rounded-lg border border-gray-300 max-h-64 object-contain mx-auto" src="" alt="プレビュー">
+                <button onclick="analyzeImage()" class="mt-4 w-full bg-green-500 text-white text-lg font-bold py-3 rounded-xl shadow-md hover:bg-green-600 transition active:scale-95">
+                    ✨ AIにチェックさせる
+                </button>
+            </div>
+        </div>
+
+        <div id="loading" class="hidden flex flex-col items-center justify-center py-6">
+            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
+            <p class="text-blue-600 font-semibold animate-pulse">Geminiが画像を解析中...</p>
+        </div>
+
+        <div id="resultContainer" class="hidden bg-white p-5 rounded-xl shadow-sm border border-blue-200">
+            <h2 class="text-sm font-bold text-blue-600 mb-2 border-b pb-1">チェック結果</h2>
+            <div id="resultText" class="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed"></div>
+        </div>
+
+    </main>
+
+    <script>
+        // 保存されたAPIキーを復元
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedKey = localStorage.getItem('gemini_api_key');
+            if (savedKey) document.getElementById('apiKey').value = savedKey;
+        });
+
+        function saveApiKey() {
+            const key = document.getElementById('apiKey').value.trim();
+            if (key) {
+                localStorage.setItem('gemini_api_key', key);
+                alert('APIキーを保存しました。');
+            }
+        }
+
+        let base64ImageString = "";
+        let imageMimeType = "";
+
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Gemini APIは画像の形式(MIMEタイプ)を指定する必要があるため保存しておく
+            imageMimeType = file.type;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('previewImage').src = e.target.result;
+                document.getElementById('previewContainer').classList.remove('hidden');
+                document.getElementById('resultContainer').classList.add('hidden');
+                
+                base64ImageString = e.target.result.split(',')[1];
+            }
+            reader.readAsDataURL(file);
+        }
+
+        async function fetchSystemPrompt() {
+            try {
+                const response = await fetch('./prompt.txt?' + new Date().getTime());
+                if (!response.ok) throw new Error('prompt.txtが見つかりません');
+                return await response.text();
+            } catch (error) {
+                console.warn(error);
+                return "提供された画像を確認し、計算間違いや図面のおかしな点がないか指摘してください。";
+            }
+        }
+
+        async function analyzeImage() {
+            const apiKey = localStorage.getItem('gemini_api_key');
+            if (!apiKey) {
+                alert('設定からGemini APIキーを入力して保存してください。');
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('resultContainer').classList.add('hidden');
+            const resultTextElement = document.getElementById('resultText');
+            resultTextElement.textContent = "";
+
+            try {
+                const systemPrompt = await fetchSystemPrompt();
+
+                // Gemini 1.5 Pro のエンドポイントURL
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${apiKey}`;
+
+                // Gemini API向けのリクエストデータ構造
+                const requestBody = {
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                    contents: [{
+                        role: "user",
+                        parts: [
+                            { text: "この画像をチェックして結果を教えてください。" },
+                            {
+                                inlineData: {
+                                    mimeType: imageMimeType || "image/jpeg",
+                                    data: base64ImageString
+                                }
+                            }
+                        ]
+                    }],
+                    generationConfig: {
+                        maxOutputTokens: 2000
+                    }
+                };
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error?.message || "エラーが発生しました。");
+                }
+
+                // AIの回答テキストを抽出して表示
+                const textResult = data.candidates[0].content.parts[0].text;
+                resultTextElement.textContent = textResult;
+                document.getElementById('resultContainer').classList.remove('hidden');
+
+            } catch (error) {
+                resultTextElement.textContent = "エラーが発生しました:\n" + error.message;
+                document.getElementById('resultContainer').classList.remove('hidden');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
