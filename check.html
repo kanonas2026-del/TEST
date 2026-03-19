@@ -38,7 +38,7 @@
             <label for="imageInput" class="block w-full bg-blue-500 text-white text-lg font-bold py-4 rounded-xl cursor-pointer shadow-md hover:bg-blue-600 transition active:scale-95">
                 📸 カメラを起動 / 写真を選ぶ
             </label>
-            <input type="file" id="imageInput" accept="image/*" capture="environment" class="hidden" onchange="previewImage(event)">
+            <input type="file" id="imageInput" accept="image/*" class="hidden" onchange="previewImage(event)">
             
             <div id="previewContainer" class="hidden mt-4">
                 <img id="previewImage" class="w-full rounded-lg border border-gray-300 max-h-64 object-contain mx-auto" src="" alt="プレビュー">
